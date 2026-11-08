@@ -24,7 +24,7 @@ from services import tracking
 from services.analytics import sort_stats
 from services.statistics_collector import CollectorBusy
 from utils.formatting import esc, fmt_ago, fmt_date, fmt_int, link, truncate
-from utils.render import LEGEND, list_item, stats_line, sum_line
+from utils.render import list_item, stats_line, sum_line
 from utils.validators import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -229,10 +229,8 @@ async def render_comp_menu(app: App, page: int = 0) -> tuple[str, InlineKeyboard
         lines.append("Пока пусто. Нажмите «➕ Добавить».")
     numbered = []
     for i, (c, items) in enumerate(groups[page * PAGE : (page + 1) * PAGE], start=page * PAGE + 1):
-        lines.append(f"<b>{i}.</b> {esc(truncate(c.name, 25))} · {len(items)} публ. — {sum_line(items)}")
+        lines.append(f"<b>{i}.</b> {esc(truncate(c.name, 25))} · {len(items)} публ.\n{sum_line(items)}")
         numbered.append((str(i), CompCb(act="card", id=c.id)))
-    if groups:
-        lines.append(LEGEND)
     kb = InlineKeyboardBuilder()
     number_buttons(kb, numbered)
     pag = pagination_row(page, len(groups), PAGE, lambda p: CompCb(act="menu", page=p))
@@ -257,15 +255,13 @@ async def render_comp_card(app: App, competitor_id: int, page: int = 0) -> tuple
     items = sort_stats(_competitor_items(await app.analytics.get_competitors(), competitor_id), "v")
     page = clamp_page(page, len(items), PAGE)
     nav = ListNav("compc", competitor_id, "v", page, 0).encode()
-    lines = [f"🕵️ <b>{esc(name if competitor_id else 'Без группы')}</b> · {len(items)} публ. — {sum_line(items)}", ""]
+    lines = [f"🕵️ <b>{esc(name if competitor_id else 'Без группы')}</b> · {len(items)} публ.\n{sum_line(items)}", ""]
     if not items:
         lines.append("Публикаций нет. Нажмите «➕ Ссылки».")
     numbered = []
     for i, st in enumerate(items[page * PAGE : (page + 1) * PAGE], start=page * PAGE + 1):
         lines.append(list_item(i, st, "v", show_author=False))
         numbered.append((str(i), PubCard(id=st.id, per="", nav=nav)))
-    if items:
-        lines.append(LEGEND)
     kb = InlineKeyboardBuilder()
     number_buttons(kb, numbered)
     pag = pagination_row(page, len(items), PAGE, lambda p: CompCb(act="card", id=competitor_id, page=p))

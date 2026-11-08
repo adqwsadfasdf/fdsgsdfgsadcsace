@@ -20,10 +20,7 @@ from utils.render import growth_short, list_item, sum_line
 
 router = Router(name="youtube")
 
-BIND_HINT = (
-    "🎬 Отправьте ссылку на YouTube-видео (youtube.com/watch?v=…, youtu.be/…, /shorts/…) или ID видео.\n\n"
-    "<i>Ссылка сохраняется только во внутренней базе бота и <b>не добавляется</b> в текст публикации Telegraph.</i>"
-)
+BIND_HINT = "🎬 Пришлите ссылку на YouTube-видео. В саму публикацию Telegraph она не добавляется."
 
 
 async def start_bind(message: Message, state: FSMContext, *, target: str, ids: list[int], nav: str = "") -> None:
@@ -56,16 +53,14 @@ async def on_link(message: Message, state: FSMContext, app: App) -> None:
             select(Publication.id).where(Publication.youtube_video_id == video.id))).all())
     app.analytics.invalidate()
     kb = InlineKeyboardBuilder()
-    kb.row(button("🎬 Открыть группу", YtCb(act="card", id=video.id)))
     if data.get("target") == "pub" and ids:
         kb.row(button("📄 К публикации", PubCard(id=ids[0], nav=data.get("nav", ""))))
     elif data.get("target") == "sel":
         kb.row(button("☑️ К выбранным", SelAct(act="menu", nav=data.get("nav", ""))))
-    await message.answer(
-        f"✅ YouTube-ссылка привязана к {count} публ.\n"
-        f"Видео: {link(video.url, video.title or video.url)}\nВсего публикаций в группе: {total}",
-        reply_markup=kb.as_markup(),
-    )
+    else:
+        kb.row(button("🎬 Открыть группу", YtCb(act="card", id=video.id)))
+    await message.answer(f"✅ Видео привязано к {count} публ. (всего с этим видео: {total})",
+                         reply_markup=kb.as_markup())
 
 
 # ====================================================================== группы
@@ -91,7 +86,7 @@ async def render_groups(app: App, page: int = 0) -> tuple[str, InlineKeyboardMar
     numbered = []
     for i, g in enumerate(chunk, start=page * size + 1):
         items = by_group.get(g.id, [])
-        lines.append(f"<b>{i}.</b> {link(g.url, truncate(g.display, 30))} · {g.count} публ. — {sum_line(items)}")
+        lines.append(f"<b>{i}.</b> {link(g.url, truncate(g.display, 30))} · {g.count} публ.\n{sum_line(items)}")
         numbered.append((str(i), YtCb(act="card", id=g.id)))
     kb = InlineKeyboardBuilder()
     number_buttons(kb, numbered)

@@ -68,42 +68,46 @@ def sort_metric(st: PubStats, sort: str) -> str | None:
     return None
 
 
+NBSP = " "
+SEP = "  |  "
+
+
 def period_short(st: PubStats, period: str) -> str:
-    value, inexact = period_value(st, period)
-    if value is None:
-        return "—"
-    return fmt_delta(value) + ("*" if inexact else "")
+    value, _ = period_value(st, period)
+    return "—" if value is None else fmt_delta(value)
+
+
+def _seg(label: str, value: str) -> str:
+    # неразрывный пробел: «7д: +62» не разрывается переносом строки
+    return f"{label}:{NBSP}<b>{value}</b>"
+
+
+def _line(total: int, values: dict[str, str]) -> str:
+    return SEP.join([f"👁{NBSP}<b>{fmt_int(total)}</b>", _seg("24ч", values["24h"]), _seg("7д", values["7d"]),
+                     _seg("30д", values["30d"])])
 
 
 def stats_line(st: PubStats) -> str:
-    """Одна строка: всего · 24ч · 7д · 30д."""
-    return (f"👁 <b>{fmt_int(st.total)}</b> · 24ч {period_short(st, '24h')} · "
-            f"7д {period_short(st, '7d')} · 30д {period_short(st, '30d')}")
+    """👁 всего | 24ч: +x | 7д: +y | 30д: +z"""
+    return _line(st.total, {p: period_short(st, p) for p in ("24h", "7d", "30d")})
 
 
 def sum_line(items: list[PubStats]) -> str:
-    """Одна строка для группы публикаций (конкурент, автор, видео): всего · 24ч · 7д · 30д."""
-    parts = [f"👁 <b>{fmt_int(sum(s.total for s in items))}</b>"]
-    for period, label in (("24h", "24ч"), ("7d", "7д"), ("30d", "30д")):
-        values = [period_value(s, period) for s in items]
-        known = [v for v, _ in values if v is not None]
-        if not known:
-            parts.append(f"{label} —")
-            continue
-        inexact = any(x for _, x in values) or len(known) < len(values)
-        parts.append(f"{label} {fmt_delta(sum(known))}{'*' if inexact else ''}")
-    return " · ".join(parts)
+    """То же для группы публикаций (конкурент, автор, видео)."""
+    values = {}
+    for period in ("24h", "7d", "30d"):
+        known = [v for v, _ in (period_value(s, period) for s in items) if v is not None]
+        values[period] = fmt_delta(sum(known)) if known else "—"
+    return _line(sum(s.total for s in items), values)
 
 
 def list_item(n: int, st: PubStats, sort: str, selected: bool | None = None, show_author: bool = True) -> str:
+    """Две строки: «номер. заголовок · автор» и под ней цифры."""
     marks = ("⭐" if st.is_favorite else "") + ("🎬" if st.youtube_video_id else "") + ("❗" if st.sync_error else "")
     sel = ""
     if selected is not None:
         sel = "✅" if selected else "▫️"
     author = f" · {esc(truncate(st.author_name, 18))}" if show_author else ""
-    head = f"{sel}<b>{n}.</b>{STATUS_EMOJI.get(st.status, '')}{marks} {link(st.url, truncate(st.title, 32))}{author}"
+    head = f"{sel}<b>{n}.</b>{STATUS_EMOJI.get(st.status, '')}{marks} {link(st.url, truncate(st.title, 40))}{author}"
     extra = sort_metric(st, sort) if sort in {"fast", "trend", "prom", "low"} else None
-    return f"{head} — {stats_line(st)}" + (f" · {extra}" if extra else "")
-
-
-LEGEND = "<i>* — неполные данные</i>"
+    return f"{head}\n{stats_line(st)}" + (f"\n{extra}" if extra else "")

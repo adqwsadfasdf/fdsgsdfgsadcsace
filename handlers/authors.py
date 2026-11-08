@@ -11,7 +11,7 @@ from keyboards.callbacks import AuthorCb, ExportCb, Nav, PubList
 from keyboards.inline import button, clamp_page, number_buttons, pagination_row
 from services.analytics import AUTHOR_SORT_LABELS, author_metric, sort_authors
 from utils.formatting import STATUS_EMOJI, esc, fmt_date, fmt_delta, fmt_float, fmt_int, link, truncate
-from utils.render import LEGEND, list_item, sum_line
+from utils.render import list_item, sum_line
 
 router = Router(name="authors")
 
@@ -33,10 +33,8 @@ async def render_rating(app: App, sort: str = "v", page: int = 0) -> tuple[str, 
     numbered = []
     for i, a in enumerate(chunk, start=page * size + 1):
         medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
-        lines.append(f"{medal} <b>{esc(truncate(a.name, 25))}</b> · {a.count} публ. — {sum_line(by_author.get(a.id, []))}")
+        lines.append(f"{medal} <b>{esc(truncate(a.name, 25))}</b> · {a.count} публ.\n{sum_line(by_author.get(a.id, []))}")
         numbered.append((str(i), AuthorCb(act="card", id=a.id, sort=sort, page=page)))
-    if ranked:
-        lines.append(LEGEND)
     kb = InlineKeyboardBuilder()
     number_buttons(kb, numbered)
     pag = pagination_row(page, len(ranked), size, lambda p: AuthorCb(act="list", sort=sort, page=p))
@@ -61,7 +59,7 @@ async def render_author(app: App, author_id: int, sort: str = "v", page: int = 0
     place = next((i for i, x in enumerate(sort_authors(authors, "v"), start=1) if x.id == author_id), None)
     lines = [
         f"👤 <b>{esc(a.name)}</b> · {a.count} публ." + (f" · 🏆 {place} место" if place else ""),
-        sum_line(stats) + f" · ср. {fmt_float(a.avg)}",
+        sum_line(stats),
     ]
     if stats:
         lines.append("")
@@ -69,7 +67,6 @@ async def render_author(app: App, author_id: int, sort: str = "v", page: int = 0
             lines.append(list_item(i, st, "new", show_author=False))
         if len(stats) > 8:
             lines.append(f"… всего {len(stats)}")
-        lines.append(LEGEND)
     kb = InlineKeyboardBuilder()
     kb.row(button("📋 История публикаций", PubList(ctx="author", arg=author_id, sort="new")),
            button("👁 По просмотрам", PubList(ctx="author", arg=author_id, sort="v")))

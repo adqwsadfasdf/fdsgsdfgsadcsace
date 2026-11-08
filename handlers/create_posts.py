@@ -14,13 +14,14 @@ from sqlalchemy import func, select
 
 from app_context import App
 from database import Batch, BatchItem
-from handlers.common import answer, safe_edit
+from handlers.common import answer, error_text, safe_edit
 from handlers.states import CreatePosts
 from handlers.youtube_groups import start_bind
 from keyboards.callbacks import BatchCb, CreateCb, ExportCb, Nav, PubList
 from keyboards.inline import button, clamp_page, number_buttons, pagination_row
 from keyboards.navigation import cancel_button, cancel_kb
 from services import publications as pubs
+from services import templates
 from services.batch_creator import BatchBusyError, BatchReport, BatchStateError, ItemResult
 from services.content import nodes_to_text, prepare_content
 from utils.formatting import esc, fmt_dt, fmt_int, link, plural, split_message, truncate
@@ -46,16 +47,39 @@ ITEM_STATUS = {
 # ====================================================================== шаги мастера
 
 
+def _template_kb(has_template: bool) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    row = []
+    if has_template:
+        row.append(button("🔄 Сменить образец", CreateCb(act="tpl")))
+    row.append(button("✍️ Вручную", CreateCb(act="manual")))
+    kb.row(*row)
+    kb.row(cancel_button())
+    return kb.as_markup()
+
+
 async def start_create(message: Message, state: FSMContext, app: App) -> None:
+    """«📝 Создать»: копии поста-образца с другими именами под заголовком."""
     await state.clear()
-    await state.set_state(CreatePosts.title)
-    note = ""
-    if app.creator.busy:
-        note = "\n\n⏳ Сейчас выполняется другая партия — новую можно будет запустить после её завершения."
+    template = await templates.get_template(app)
+    busy = "\n⏳ Сейчас идёт другая партия — новая начнётся после неё." if app.creator.busy else ""
+    if template is None:
+        await state.set_state(CreatePosts.template)
+        await message.answer(
+            "📝 Пришлите ссылку на <b>пост-образец</b> Telegraph.\n"
+            "Бот скопирует его заголовок и текст со всем оформлением, а под заголовком поставит нужное имя." + busy,
+            reply_markup=_template_kb(False),
+        )
+        return
+    await _ask_names(message, state, template, busy)
+
+
+async def _ask_names(message: Message, state: FSMContext, template: templates.Template, note: str = "") -> None:
+    await state.set_state(CreatePosts.names)
     await message.answer(
-        "📝 <b>Создание публикаций — шаг 1 из 3</b>\n\nОтправьте <b>общий заголовок</b> публикаций "
-        f"(до 256 символов).{note}",
-        reply_markup=cancel_kb(),
+        f"📝 Образец: {link(template.url, truncate(template.title, 60))}\n"
+        "Пришлите имя для подписи (можно несколько — каждое с новой строки)." + note,
+        reply_markup=_template_kb(True),
     )
 
 
@@ -63,6 +87,64 @@ async def start_create(message: Message, state: FSMContext, app: App) -> None:
 async def on_create_cb(cb: CallbackQuery, state: FSMContext, app: App) -> None:
     await start_create(cb.message, state, app)
     await answer(cb)
+
+
+@router.callback_query(CreateCb.filter(F.act == "tpl"))
+async def on_change_template(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(CreatePosts.template)
+    await cb.message.answer("🔄 Пришлите ссылку на новый пост-образец Telegraph.", reply_markup=_template_kb(False))
+    await answer(cb)
+
+
+@router.callback_query(CreateCb.filter(F.act == "manual"))
+async def on_manual(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await state.set_state(CreatePosts.title)
+    await cb.message.answer("✍️ <b>Шаг 1 из 3</b>\nОтправьте <b>заголовок</b> публикаций (до 256 символов).",
+                            reply_markup=cancel_kb())
+    await answer(cb)
+
+
+@router.message(CreatePosts.template, F.text)
+async def on_template_link(message: Message, state: FSMContext, app: App) -> None:
+    try:
+        template = await templates.load_template(app, message.text)
+    except ValidationError as exc:
+        await message.answer(f"❗ {exc}", reply_markup=_template_kb(False))
+        return
+    except Exception as exc:  # noqa: BLE001
+        await message.answer(f"❗ Не удалось загрузить пост: {esc(error_text(exc))}", reply_markup=_template_kb(False))
+        return
+    await message.answer("✅ Образец сохранён.")
+    await _ask_names(message, state, template)
+
+
+@router.message(CreatePosts.names, F.text)
+async def on_names(message: Message, state: FSMContext, app: App, bot: Bot) -> None:
+    template = await templates.get_template(app)
+    if template is None:
+        await start_create(message, state, app)
+        return
+    max_size = int(app.settings["max_batch_size"])
+    parsed = parse_authors(message.text, max_size)
+    if not parsed.authors or len(parsed.authors) > max_size:
+        errors = "\n".join(f"• {esc(e)}" for e in parsed.errors) or "• пусто"
+        await message.answer(f"❗ Имена не приняты:\n{errors}", reply_markup=_template_kb(True))
+        return
+    async with app.create_guard:
+        if app.creator.busy:
+            await message.answer("⏳ Уже идёт создание партии. Дождитесь завершения и пришлите имена снова.",
+                                 reply_markup=_template_kb(True))
+            return
+        await state.clear()
+        batch_id = await app.creator.create_draft(template.title, "", template.content_json, parsed.authors)
+    await _launch(message, app, bot, batch_id, len(parsed.authors))
+
+
+async def _launch(message: Message, app: App, bot: Bot, batch_id: int, total: int) -> None:
+    progress = await message.answer(f"⏳ Создаю: 0 из {total}", reply_markup=_stop_kb(batch_id))
+    app.spawn(run_with_progress(app, bot, progress.chat.id, progress.message_id, batch_id), name=f"batch-{batch_id}")
 
 
 @router.message(CreatePosts.title, F.text)
@@ -221,9 +303,7 @@ async def on_go(cb: CallbackQuery, state: FSMContext, app: App, bot: Bot) -> Non
         await cb.message.edit_reply_markup(reply_markup=None)
     except Exception:  # noqa: BLE001
         pass
-    progress = await cb.message.answer(f"⏳ Создание публикаций: 0 из {len(data['authors'])}",
-                                       reply_markup=_stop_kb(batch_id))
-    app.spawn(run_with_progress(app, bot, progress.chat.id, progress.message_id, batch_id), name=f"batch-{batch_id}")
+    await _launch(cb.message, app, bot, batch_id, len(data["authors"]))
 
 
 def _stop_kb(batch_id: int) -> InlineKeyboardMarkup:
@@ -279,7 +359,7 @@ def format_report(report: BatchReport) -> str:
         head = f"⏹ <b>Создание остановлено.</b> Создано {len(created)} из {report.total}"
     else:
         head = f"⚠️ <b>Создано {len(created)} из {report.total}</b>"
-    lines = [head, f"Партия #{report.batch_id}: «{esc(report.title)}»", ""]
+    lines = [head]
     for item in created:
         lines.append(f"{item.position}. {esc(item.author)} — {link(item.url, item.url) if item.url else '—'}")
     if failed:
@@ -319,6 +399,8 @@ async def on_stop(cb: CallbackQuery, callback_data: CreateCb, app: App) -> None:
     await answer(cb, "⏹ Остановлю после текущей публикации", alert=True)
 
 
+@router.message(CreatePosts.template)
+@router.message(CreatePosts.names)
 @router.message(CreatePosts.title)
 @router.message(CreatePosts.text)
 @router.message(CreatePosts.authors)

@@ -11,7 +11,7 @@ from keyboards.callbacks import Nav, PubList, StatCb
 from keyboards.inline import button
 from services.analytics import period_value, sort_stats
 from utils.formatting import esc, fmt_ago, fmt_int, link, truncate
-from utils.render import LEGEND, period_short, sum_line
+from utils.render import period_short, sum_line
 
 router = Router(name="statistics")
 
@@ -22,11 +22,9 @@ async def render_overview(app: App) -> tuple[str, InlineKeyboardMarkup]:
     lines = [
         f"📊 <b>Статистика</b> · {fmt_int(ov.pubs)} публ. · {fmt_int(ov.authors)} авт.",
         sum_line(items),
-        f"📈 {ov.growing} · ➖ {ov.stable} · 📉 {ov.declining} · 🆕 {ov.new}",
+        f"📈 растут: {ov.growing}  |  ➖ стабильно: {ov.stable}  |  📉 падают: {ov.declining}",
         f"🕒 обновлено {fmt_ago(ov.last_update_ts)}" + (f" · ❗ ошибок: {ov.errors}" if ov.errors else ""),
     ]
-    if items:
-        lines.append(LEGEND)
     kb = InlineKeyboardBuilder()
     kb.row(button("👁 Всего", PubList(ctx="stat", sort="v")), button("24 ч", PubList(ctx="stat", sort="d1")),
            button("7 дн.", PubList(ctx="stat", sort="d7")), button("30 дн.", PubList(ctx="stat", sort="d30")))
@@ -55,8 +53,8 @@ async def render_best(app: App) -> tuple[str, InlineKeyboardMarkup]:
             metric = period_short(best, period)
         else:
             metric = f"👁 {fmt_int(best.total)}"
-        lines.append(f"{label}: {link(best.url, truncate(best.title, 35))} · {esc(truncate(best.author_name, 15))} "
-                     f"— {metric}")
+        lines.append(f"<b>{label}:</b> <b>{metric}</b>  |  {link(best.url, truncate(best.title, 35))} · "
+                     f"{esc(truncate(best.author_name, 15))}")
     kb = InlineKeyboardBuilder()
     kb.row(button("Топ 24 ч", PubList(ctx="best", sort="d1")), button("Топ 7 дн.", PubList(ctx="best", sort="d7")),
            button("Топ 30 дн.", PubList(ctx="best", sort="d30")))
@@ -71,7 +69,7 @@ ACCURACY_TEXT = (
     "👁 Всего — счётчик Telegraph (getViews), страницы бот не открывает.\n"
     "24ч / 7д / 30д — разница счётчика по снимкам, которые бот делает каждые N минут. "
     "Для только что добавленных 7д и 30д берутся из просмотров по дням (тоже getViews).\n"
-    "* — история пока короче периода."
+    "Пока бот следит за постом меньше периода, цифра показывает прирост за то время, что есть."
 )
 
 

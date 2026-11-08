@@ -5,7 +5,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app_context import App
@@ -19,7 +19,7 @@ from services import publications as pubs
 from services.analytics import PERIOD_LABELS, SORT_LABELS, PubStats
 from services.content import prepare_content
 from utils.formatting import STATUS_LABELS, esc, fmt_ago, fmt_date, fmt_dt, fmt_float, fmt_int, fmt_pct, link, truncate
-from utils.render import LEGEND, growth_text, list_item, stats_line
+from utils.render import growth_text, list_item, stats_line
 from utils.validators import ValidationError, validate_author, validate_label, validate_title
 
 logger = logging.getLogger(__name__)
@@ -62,8 +62,6 @@ async def render_list(app: App, ctx: str, arg: int = 0, sort: str = "new", page:
             break
         lines.append(item)
         shown += 1
-    if items:
-        lines.append(LEGEND)
 
     kb = InlineKeyboardBuilder()
     numbered = []
@@ -194,7 +192,7 @@ async def render_card(app: App, pub_id: int, per: str = "", nav_raw: str = ""
     created = fmt_date(st.created_ts, tz)
     extra = []
     if video:
-        extra.append(f"🎬 {link(video.url, truncate(video.title or 'YouTube', 30))} ({group_size})")
+        extra.append("🎬 видео привязано")
     if st.label:
         extra.append(f"🏷 {esc(st.label)}")
     if st.is_favorite:
@@ -234,14 +232,17 @@ async def render_card(app: App, pub_id: int, per: str = "", nav_raw: str = ""
     kb.row(button("🔄 Обновить", PubAct(act="refresh", id=pub_id, nav=nav_raw)),
            button("★ Из избр." if st.is_favorite else "⭐ В избр.", PubAct(act="fav", id=pub_id, nav=nav_raw)),
            button("✖️ Кратко" if per else "📊 Подробнее", PubCard(id=pub_id, per="" if per else "24h", nav=nav_raw)))
-    row = [button("🎬 YouTube", PubAct(act="yt", id=pub_id, nav=nav_raw)),
-           button("🏷 Метка", PubAct(act="label", id=pub_id, nav=nav_raw))]
+    if video:
+        # «🎬 YouTube» просто присылает ссылку на видео
+        kb.row(button("🎬 YouTube", PubAct(act="ytshow", id=pub_id, nav=nav_raw)),
+               button("✏️ Видео", PubAct(act="yt", id=pub_id, nav=nav_raw)),
+               button("❌ Видео", PubAct(act="ytdel", id=pub_id, nav=nav_raw)))
+    else:
+        kb.row(button("🎬 Привязать YouTube", PubAct(act="yt", id=pub_id, nav=nav_raw)))
+    row = [button("🏷 Метка", PubAct(act="label", id=pub_id, nav=nav_raw))]
     if pub.account_id is not None:
         row.append(button("✏️ Правка", PubAct(act="edit", id=pub_id, nav=nav_raw)))
     kb.row(*row)
-    if video:
-        kb.row(button("🎬 Группа видео", YtCb(act="card", id=video.id)),
-               button("❌ Отвязать YouTube", PubAct(act="ytdel", id=pub_id, nav=nav_raw)))
     kb.row(button("👤 Автор", AuthorCb(act="card", id=st.author_id)),
            button("✅ Выбрано" if selected else "☑️ Выбрать", PubAct(act="sel", id=pub_id, nav=nav_raw)),
            button("🗑 Удалить", PubAct(act="del", id=pub_id, nav=nav_raw)))
@@ -339,6 +340,19 @@ async def act_check(cb: CallbackQuery, callback_data: PubAct, app: App) -> None:
          f"Просмотров: {page.views}\n" + ("Данные совпадают с базой." if same else "⚠️ Данные отличаются от базы!"))[:195],
         alert=True,
     )
+
+
+@router.callback_query(PubAct.filter(F.act == "ytshow"))
+async def act_ytshow(cb: CallbackQuery, callback_data: PubAct, app: App) -> None:
+    async with app.db() as session:
+        pub = await session.get(Publication, callback_data.id)
+        video = await session.get(YouTubeVideo, pub.youtube_video_id) if pub and pub.youtube_video_id else None
+    if video is None:
+        await answer(cb, "К публикации не привязано видео", alert=True)
+        return
+    # только ссылка; превью включено, чтобы сразу было видно видео
+    await cb.message.answer(video.url, parse_mode=None, link_preview_options=LinkPreviewOptions(is_disabled=False))
+    await answer(cb)
 
 
 @router.callback_query(PubAct.filter(F.act == "ytdel"))

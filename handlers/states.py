@@ -3,6 +3,8 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class CreatePosts(StatesGroup):
+    template = State()  # ждём ссылку на пост-образец
+    names = State()  # ждём имена для копий образца
     title = State()
     text = State()
     authors = State()
