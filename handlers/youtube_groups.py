@@ -16,7 +16,7 @@ from keyboards.inline import button, clamp_page, number_buttons, pagination_row
 from keyboards.navigation import cancel_kb
 from services import youtube as yt
 from utils.formatting import STATUS_EMOJI, esc, fmt_delta, fmt_int, link, truncate
-from utils.render import growth_short
+from utils.render import growth_short, list_item, sum_line
 
 router = Router(name="youtube")
 
@@ -85,17 +85,13 @@ async def render_groups(app: App, page: int = 0) -> tuple[str, InlineKeyboardMar
     size = int(app.settings["page_size"])
     page = clamp_page(page, len(groups), size)
     chunk = groups[page * size : (page + 1) * size]
-    lines = ["🎬 <b>Группы YouTube</b>", f"Групп: {len(groups)} · публикаций без видео: {no_link}", ""]
+    lines = [f"🎬 <b>Группы YouTube</b> · {len(groups)} · без видео: {no_link}", ""]
     if not groups:
-        lines.append("Пока нет групп. Привяжите YouTube-ссылку в карточке публикации или к нескольким "
-                     "выбранным публикациям сразу (☑️ Выбрать → Действия → Привязать YouTube).")
+        lines.append("Групп нет. Привяжите ссылку YouTube в карточке публикации.")
     numbered = []
     for i, g in enumerate(chunk, start=page * size + 1):
         items = by_group.get(g.id, [])
-        total = sum(s.total for s in items)
-        g24 = sum(s.g24.value for s in items)
-        lines.append(f"<b>{i}.</b> {link(g.url, truncate(g.display, 50))}\n"
-                     f"    📄 {g.count} публ. · 👁 {fmt_int(total)} · 24ч {fmt_delta(g24)}")
+        lines.append(f"<b>{i}.</b> {link(g.url, truncate(g.display, 30))} · {g.count} публ. — {sum_line(items)}")
         numbered.append((str(i), YtCb(act="card", id=g.id)))
     kb = InlineKeyboardBuilder()
     number_buttons(kb, numbered)
@@ -119,25 +115,16 @@ async def render_group(app: App, group_id: int) -> tuple[str, InlineKeyboardMark
         key=lambda s: s.total, reverse=True,
     )
     lines = [
-        f"🎬 <b>{esc(video.title or 'Видео ' + video.video_id)}</b>",
-        f"🔗 {link(video.url, video.url)}",
-        "",
-        f"📄 Публикаций: {len(items)}",
-        f"👁 Просмотров всего: <b>{fmt_int(sum(s.total for s in items))}</b> <i>(факт API)</i>",
-        f"📈 Прирост 24 ч: {fmt_delta(sum(s.g24.value for s in items))} · "
-        f"7 дн.: {fmt_delta(sum(s.g7.value for s in items))} · 30 дн.: {fmt_delta(sum(s.g30.value for s in items))}",
-        "<i>(расчёт по снимкам)</i>",
+        f"🎬 {link(video.url, truncate(video.title or 'Видео ' + video.video_id, 60))} · {len(items)} публ.",
+        sum_line(items),
         "",
     ]
-    for i, st in enumerate(items[:15], start=1):
-        lines.append(f"{i}. {STATUS_EMOJI.get(st.status, '')} <b>{esc(st.author_name)}</b> — "
-                     f"{link(st.url, truncate(st.title, 40))}\n"
-                     f"    👁 {fmt_int(st.total)} · 24ч {growth_short(st.g24)} · 7д {growth_short(st.g7)}")
-    if len(items) > 15:
-        lines.append(f"… и ещё {len(items) - 15} — откройте полный список")
+    for i, st in enumerate(items[:10], start=1):
+        lines.append(list_item(i, st, "v"))
+    if len(items) > 10:
+        lines.append(f"… ещё {len(items) - 10}")
     kb = InlineKeyboardBuilder()
-    kb.row(button("📋 Все публикации группы", PubList(ctx="yt", arg=group_id, sort="v")),
-           button("📥 Excel", ExportCb(act="yt", arg=group_id)))
+    kb.row(button("📋 Все публикации группы", PubList(ctx="yt", arg=group_id, sort="v")))
     kb.row(button("➕ Добавить публикации", YtCb(act="add", id=group_id)))
     kb.row(button("✏️ Изменить ссылку", YtCb(act="chg", id=group_id)),
            button("✏️ Название", YtCb(act="ren", id=group_id)))

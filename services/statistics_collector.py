@@ -240,6 +240,7 @@ class StatisticsCollector:
                             await session.commit()
                             stored += len(rows)
             await self._settings.set_state("last_daily_sync", {"ts": now, "stored": stored, "jobs": len(jobs)})
+            self._analytics.invalidate()
             logger.info("Синхронизация по дням: запросов %s, сохранено %s", len(jobs), stored)
             return stored
 

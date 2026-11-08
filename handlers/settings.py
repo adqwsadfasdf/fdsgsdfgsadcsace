@@ -31,12 +31,8 @@ async def render_menu(app: App) -> tuple[str, InlineKeyboardMarkup]:
     daily = await app.settings.get_state("last_daily_sync")
     lines = [
         "⚙️ <b>Настройки</b>",
-        "",
-        f"⏱ Снимки просмотров: каждые {app.settings['snapshot_interval_minutes']} мин · "
-        f"последний сбор: {fmt_ago(last.get('ts')) if last else 'ещё не было'}",
-        f"📅 Данные по дням: каждые {app.settings['daily_sync_hours']} ч · "
-        f"последняя синхронизация: {fmt_ago(daily.get('ts')) if daily else 'ещё не было'}",
-        f"🔔 Уведомления включены: {sum(1 for s in SPECS if s.group == 'notify' and s.type is bool and app.settings[s.key])}",
+        f"⏱ Сбор каждые {app.settings['snapshot_interval_minutes']} мин · "
+        f"последний: {fmt_ago(last.get('ts')) if last else 'ещё не было'}",
     ]
     kb = InlineKeyboardBuilder()
     for code, title in GROUPS.items():

@@ -1,7 +1,7 @@
 """Тексты статистики для сообщений: прирост с пометками точности, строки списков."""
 from __future__ import annotations
 
-from services.analytics import Growth, PubStats
+from services.analytics import Growth, PubStats, period_value
 from utils.formatting import (
     STATUS_EMOJI,
     esc,
@@ -68,28 +68,42 @@ def sort_metric(st: PubStats, sort: str) -> str | None:
     return None
 
 
-def list_item(n: int, st: PubStats, sort: str, selected: bool | None = None) -> str:
-    marks = ""
-    if st.is_favorite:
-        marks += "⭐"
-    if st.youtube_video_id:
-        marks += "🎬"
-    if st.label:
-        marks += f" 🏷{esc(truncate(st.label, 15))}"
-    if st.sync_error:
-        marks += " ❗"
+def period_short(st: PubStats, period: str) -> str:
+    value, inexact = period_value(st, period)
+    if value is None:
+        return "—"
+    return fmt_delta(value) + ("*" if inexact else "")
+
+
+def stats_line(st: PubStats) -> str:
+    """Одна строка: всего · 24ч · 7д · 30д."""
+    return (f"👁 <b>{fmt_int(st.total)}</b> · 24ч {period_short(st, '24h')} · "
+            f"7д {period_short(st, '7d')} · 30д {period_short(st, '30d')}")
+
+
+def sum_line(items: list[PubStats]) -> str:
+    """Одна строка для группы публикаций (конкурент, автор, видео): всего · 24ч · 7д · 30д."""
+    parts = [f"👁 <b>{fmt_int(sum(s.total for s in items))}</b>"]
+    for period, label in (("24h", "24ч"), ("7d", "7д"), ("30d", "30д")):
+        values = [period_value(s, period) for s in items]
+        known = [v for v, _ in values if v is not None]
+        if not known:
+            parts.append(f"{label} —")
+            continue
+        inexact = any(x for _, x in values) or len(known) < len(values)
+        parts.append(f"{label} {fmt_delta(sum(known))}{'*' if inexact else ''}")
+    return " · ".join(parts)
+
+
+def list_item(n: int, st: PubStats, sort: str, selected: bool | None = None, show_author: bool = True) -> str:
+    marks = ("⭐" if st.is_favorite else "") + ("🎬" if st.youtube_video_id else "") + ("❗" if st.sync_error else "")
     sel = ""
     if selected is not None:
-        sel = "✅ " if selected else "▫️ "
-    head = (
-        f"{sel}<b>{n}.</b> {STATUS_EMOJI.get(st.status, '')} <b>{esc(truncate(st.author_name, 40))}</b> — "
-        f"{link(st.url, truncate(st.title, 50))} {marks}".rstrip()
-    )
-    line2 = f"    👁 {fmt_int(st.total)} · 24ч {growth_short(st.g24)} · 7д {growth_short(st.g7)}"
-    extra = sort_metric(st, sort)
-    if extra:
-        line2 += f"\n    {extra}"
-    return f"{head}\n{line2}"
+        sel = "✅" if selected else "▫️"
+    author = f" · {esc(truncate(st.author_name, 18))}" if show_author else ""
+    head = f"{sel}<b>{n}.</b>{STATUS_EMOJI.get(st.status, '')}{marks} {link(st.url, truncate(st.title, 32))}{author}"
+    extra = sort_metric(st, sort) if sort in {"fast", "trend", "prom", "low"} else None
+    return f"{head} — {stats_line(st)}" + (f" · {extra}" if extra else "")
 
 
-LEGEND = "<i>* — неполные данные, ≈ — приблизительно. 📈 растёт · ➖ стабильно · 📉 спад · 🆕 мало данных</i>"
+LEGEND = "<i>* — неполные данные</i>"

@@ -26,7 +26,7 @@ class SortMenu(CallbackData, prefix="ps"):
 
 class PubCard(CallbackData, prefix="pc"):
     id: int
-    per: str = "24h"
+    per: str = ""  # "" — короткая карточка; 24h / 7d / 30d / all — подробности за период
     nav: str = ""  # закодированный контекст списка для кнопки «Назад»
 
 

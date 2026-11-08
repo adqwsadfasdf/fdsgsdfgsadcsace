@@ -21,6 +21,7 @@ from database import (
     KIND_IMPORTED,
     Competitor,
     Publication,
+    SelectedPublication,
     TelegraphAccount,
     ViewSnapshot,
     get_or_create_author,
@@ -207,7 +208,16 @@ async def track_paths(app: "App", paths: list[str], *, competitor: bool, competi
         try:
             if path in known:
                 pub_id, kind = known[path]
-                if kind != KIND_COMPETITOR:
+                if competitor and kind == KIND_IMPORTED:
+                    # раньше добавлена как «своя готовая», а это конкурент — переносим, история сохраняется
+                    async with app.db() as session:
+                        pub = await session.get(Publication, pub_id)
+                        pub.kind, pub.competitor_id, pub.account_id = KIND_COMPETITOR, competitor_id, None
+                        title = pub.title
+                        await session.commit()
+                    await _unselect(app, [pub_id])
+                    result.moved.append((pub_id, title))
+                elif kind != KIND_COMPETITOR:
                     result.existing_own.append(path)
                 elif competitor:
                     result.existing_comp.append(path)
@@ -299,6 +309,12 @@ async def import_account(app: "App", account_id: int, progress: Progress | None 
     app.analytics.invalidate()
     _after_add(app, result)
     return result
+
+
+async def _unselect(app: "App", ids: list[int]) -> None:
+    async with app.db() as session:
+        await session.execute(delete(SelectedPublication).where(SelectedPublication.publication_id.in_(ids)))
+        await session.commit()
 
 
 def _after_add(app: "App", result: TrackResult) -> None:

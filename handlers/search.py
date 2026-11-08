@@ -63,23 +63,12 @@ async def render_menu(app: App) -> tuple[str, InlineKeyboardMarkup]:
     filters = await pubs.load_filters(app)
     found = len(await pubs.query(app, "search")) if not filters.is_empty() else 0
     lines = [
-        "🔍 <b>Поиск публикаций</b>",
-        "",
-        "Отправьте запрос сообщением — тип определится автоматически:",
-        "• имя автора или слово из заголовка;",
-        "• дата <code>08.11.2026</code> или период <code>01.11.2026-08.11.2026</code>;",
-        "• ссылка Telegraph;",
-        "• ссылка YouTube.",
-        "",
-        "Фильтры объединяются: например, задайте автора кнопкой, затем отправьте ссылку YouTube — "
-        "найдутся публикации этого автора с этим видео. Чтобы убрать фильтр, отправьте «-».",
-        "",
-        "<b>Текущие фильтры:</b>",
+        "🔍 <b>Поиск</b>",
+        "Отправьте автора, слово из заголовка, дату (08.11.2026) или ссылку Telegraph / YouTube.",
     ]
     desc = describe(filters)
-    lines += desc or ["<i>не заданы</i>"]
     if desc:
-        lines += ["", f"Найдено: <b>{found}</b>"]
+        lines += ["", "<b>Фильтры:</b>"] + desc + [f"Найдено: <b>{found}</b>"]
     kb = InlineKeyboardBuilder()
     kb.row(button("👤 Автор", SearchCb(act="f_author")), button("📝 Заголовок", SearchCb(act="f_title")),
            button("📅 Дата", SearchCb(act="f_date")))
@@ -88,7 +77,7 @@ async def render_menu(app: App) -> tuple[str, InlineKeyboardMarkup]:
     kb.row(button(("✅ " if filters.favorites else "") + "⭐ Только избранное", SearchCb(act="fav")))
     if desc:
         kb.row(button(f"📋 Показать результаты ({found})", PubList(ctx="search", sort="new")))
-        kb.row(button("📥 Excel результатов", ExportCb(act="Lsearch")), button("🧹 Сбросить", SearchCb(act="reset")))
+        kb.row(button("🧹 Сбросить", SearchCb(act="reset")))
     kb.row(button("🏠 Меню", Nav(to="main")))
     return "\n".join(lines), kb.as_markup()
 

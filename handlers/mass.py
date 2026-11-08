@@ -93,7 +93,6 @@ async def render_menu(cb: CallbackQuery, app: App, nav_raw: str) -> None:
                button("★ Из избранного", SelAct(act="favoff", nav=nav_raw)))
         kb.row(button("✏️ Заголовок в Telegraph", SelAct(act="et", nav=nav_raw)),
                button("✏️ Текст в Telegraph", SelAct(act="ex", nav=nav_raw)))
-        kb.row(button("📥 Экспорт в Excel", ExportCb(act="Lsel")))
         kb.row(button("🗑 Удалить из базы", SelAct(act="del", nav=nav_raw)))
         kb.row(button("🧹 Снять выбор", SelAct(act="clear", nav=nav_raw)))
     nav = ListNav.decode(nav_raw)

@@ -295,8 +295,7 @@ def format_report(report: BatchReport) -> str:
 def report_kb(report: BatchReport) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     if report.created:
-        kb.row(button("📋 Открыть партию", PubList(ctx="batch", arg=report.batch_id, sort="old")),
-               button("📥 Excel", ExportCb(act="batch", arg=report.batch_id)))
+        kb.row(button("📋 Открыть партию", PubList(ctx="batch", arg=report.batch_id, sort="old")))
         kb.row(button("🎬 Привязать YouTube ко всей партии", BatchCb(act="yt", id=report.batch_id)))
     if report.not_created and report.status in {"partial", "cancelled", "interrupted"}:
         kb.row(button("🔁 Создать оставшиеся", BatchCb(act="resume", id=report.batch_id)))

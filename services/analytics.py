@@ -138,6 +138,13 @@ class PubStats:
     trend_score: float = 0.0
     promise_score: float = 0.0
     computed_at: int = 0
+    # Факт getViews по календарным суткам: сумма и число загруженных/ожидаемых дней за 7 и 30 дней
+    day7: int = 0
+    day7_n: int = 0
+    day7_exp: int = 0
+    day30: int = 0
+    day30_n: int = 0
+    day30_exp: int = 0
 
     @property
     def age_hours(self) -> float:
@@ -227,17 +234,35 @@ AUTHOR_SORT_LABELS = {
 }
 
 
+def period_value(st: PubStats, period: str) -> tuple[int | None, bool]:
+    """(значение, неточное ли) для короткой строки «24ч / 7д / 30д».
+
+    Основа — прирост по снимкам. Если снимков за период ещё мало (публикация только добавлена),
+    для 7 и 30 дней берётся факт getViews по календарным суткам — он доступен сразу.
+    """
+    g = st.growth(period)
+    if g.usable:
+        return g.value, g.quality == "approx"
+    if g.quality == "future":
+        return None, False
+    if period in {"7d", "30d"}:
+        total, loaded, expected = ((st.day7, st.day7_n, st.day7_exp) if period == "7d"
+                                   else (st.day30, st.day30_n, st.day30_exp))
+        if loaded:
+            return max(total, g.value if g.quality == "partial" else 0), loaded < expected
+    if g.quality == "nodata":
+        return None, False
+    return g.value, True
+
+
 def sort_stats(items: list[PubStats], sort: str) -> list[PubStats]:
     if sort == "old":
         return sorted(items, key=lambda s: (s.created_ts, s.id))
     if sort == "v":
         return sorted(items, key=lambda s: (s.total, s.id), reverse=True)
-    if sort == "d1":
-        return sorted(items, key=lambda s: (s.g24.value, s.total), reverse=True)
-    if sort == "d7":
-        return sorted(items, key=lambda s: (s.g7.value, s.total), reverse=True)
-    if sort == "d30":
-        return sorted(items, key=lambda s: (s.g30.value, s.total), reverse=True)
+    if sort in {"d1", "d7", "d30"}:
+        period = {"d1": "24h", "d7": "7d", "d30": "30d"}[sort]
+        return sorted(items, key=lambda s: (period_value(s, period)[0] or 0, s.total), reverse=True)
     if sort == "au":
         return sorted(items, key=lambda s: (s.author_name.casefold(), -s.created_ts))
     if sort == "fast":
@@ -366,6 +391,20 @@ class Analytics:
                 )
             ).all()
             raw = {key: await self._window(session, s, e) for key, (s, e, _) in windows.items()}
+            today = datetime.now(timezone.utc).date()
+            d7_from, d30_from = (today - timedelta(days=6)).isoformat(), (today - timedelta(days=29)).isoformat()
+            daily = {
+                r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), int(r[4] or 0))
+                for r in (await session.execute(
+                    select(
+                        DailyView.publication_id,
+                        func.sum(case((DailyView.day >= d7_from, DailyView.views), else_=0)),
+                        func.sum(case((DailyView.day >= d7_from, 1), else_=0)),
+                        func.sum(DailyView.views),
+                        func.count(),
+                    ).where(DailyView.day >= d30_from).group_by(DailyView.publication_id)
+                )).all()
+            }
 
         result: dict[int, PubStats] = {}
         for p in pubs:
@@ -382,6 +421,11 @@ class Analytics:
             for key, (s, e, is_now) in windows.items():
                 setattr(st, key, self._growth(raw[key].get(p.id), s, e, is_now, created_ts, tol,
                                               tracked=st.tracked_ts is not None))
+            if p.id in daily:
+                st.day7, st.day7_n, st.day30, st.day30_n = daily[p.id]
+            created_day = datetime.fromtimestamp(created_ts, tz=timezone.utc).date()
+            age_days = (today - created_day).days + 1
+            st.day7_exp, st.day30_exp = max(1, min(7, age_days)), max(1, min(30, age_days))
             self._classify(st, now)
             result[p.id] = st
         logger.debug("Аналитика пересчитана за %.3f с (%s публикаций)", time.perf_counter() - started, len(result))
